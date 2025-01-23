@@ -2,12 +2,15 @@ const db = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Secret_key = "rizext";
-const userRegistration = async (data) => {
+const userRegistration = async (data, requester) => {
   const { nama_user, email_user, nomor_telepon, password, is_admin } = data;
 
   // Validasi input
   if (!nama_user || !email_user || !nomor_telepon || !password) {
-    return "nama_user, email_user, nomor_telepon, password are required";
+    return {
+      status: 400,
+      message: "nama_user, email_user, nomor_telepon, password are required",
+    };
   }
 
   try {
@@ -15,7 +18,17 @@ const userRegistration = async (data) => {
     const newPassword = await bcrypt.hash(password, salt);
 
     // Jika is_admin tidak disertakan, defaultkan ke 0 (user biasa)
-    const adminStatus = is_admin === undefined ? 0 : is_admin;
+    let adminStatus = 0; // Default: User biasa
+    if (is_admin !== undefined) {
+      // Jika pengguna meminta is_admin = 1, periksa apakah requester adalah admin
+      if (is_admin === 1 && (!requester || requester.is_admin !== 1)) {
+        return {
+          status: 403,
+          message: "Access Denied: Only admins can create other admins",
+        };
+      }
+      adminStatus = is_admin; // Hanya diterima jika requester adalah admin
+    }
 
     // Menyisipkan data ke dalam tabel user
     const [result] = await db.query(
@@ -23,10 +36,19 @@ const userRegistration = async (data) => {
       [nama_user, email_user, nomor_telepon, newPassword, adminStatus]
     );
 
-    return { id_user: result.insertId, pass: newPassword };
+    return {
+      status: 201,
+      message: "User registered successfully",
+      data: {
+        id_user: result.insertId,
+        nama_user,
+        email_user,
+        is_admin: adminStatus,
+      },
+    };
   } catch (error) {
     console.error("Error in userRegistration:", error.message);
-    throw new Error("Error Detected");
+    throw { status: 500, message: "Error Detected: " + error.message };
   }
 };
 
@@ -58,6 +80,7 @@ const userLogin = async (data) => {
           id_user: user.id_user,
           nama_user: user.nama_user,
           email_user: user.email_user,
+          is_admin: user.is_admin, // Tambahkan role pengguna
         };
 
         // Membuat token JWT
@@ -66,6 +89,12 @@ const userLogin = async (data) => {
           status: 200,
           message: "Login berhasil",
           token: token,
+          data: {
+            id_user: user.id_user,
+            nama_user: user.nama_user,
+            email_user: user.email_user,
+            is_admin: user.is_admin,
+          },
         };
       }
 
@@ -88,12 +117,16 @@ const userLogin = async (data) => {
   }
 };
 
-const getUser = async () => {
+const getAllUsers = async () => {
   try {
-    const [result] = await db.query("select * from user");
+    // Ambil semua data pengguna
+    const [result] = await db.query(
+      "SELECT id_user, nama_user, email_user, nomor_telepon, is_admin FROM user"
+    );
     return result;
   } catch (error) {
-    console.log(error);
+    console.error("Error fetching all users:", error.message);
+    throw new Error("Error fetching all users");
   }
 };
 
@@ -139,4 +172,83 @@ const getUserProfileById = async (data) => {
   }
 };
 
-module.exports = { userRegistration, userLogin, getUser, getUserProfileById };
+const updateUserById = async (id_user, data) => {
+  try {
+    const { nama_user, email_user, nomor_telepon, password } = data;
+
+    // Periksa apakah data untuk update disediakan
+    if (!nama_user && !email_user && !nomor_telepon && !password) {
+      throw new Error("No data provided for update");
+    }
+
+    // Siapkan array query untuk pembaruan
+    const updates = [];
+    const values = [];
+
+    if (nama_user) {
+      updates.push("nama_user = ?");
+      values.push(nama_user);
+    }
+
+    if (email_user) {
+      updates.push("email_user = ?");
+      values.push(email_user);
+    }
+
+    if (nomor_telepon) {
+      updates.push("nomor_telepon = ?");
+      values.push(nomor_telepon);
+    }
+
+    if (password) {
+      const salt = 10;
+      const hashedPassword = await bcrypt.hash(password, salt);
+      updates.push("password = ?");
+      values.push(hashedPassword);
+    }
+
+    values.push(id_user); // Tambahkan `id_user` di akhir untuk klausa WHERE
+
+    // Buat query SQL untuk pembaruan
+    const sql = `UPDATE user SET ${updates.join(", ")} WHERE id_user = ?`;
+    const [result] = await db.query(sql, values);
+
+    // Periksa apakah ada baris yang diperbarui
+    if (result.affectedRows === 0) {
+      throw new Error("User not found or no changes made");
+    }
+
+    return { status: 200, message: "User updated successfully" };
+  } catch (error) {
+    console.error("Error updating user:", error.message);
+    throw new Error("Error updating user");
+  }
+};
+
+const deleteUserById = async (id_user) => {
+  try {
+    // Hapus data dari tabel user berdasarkan ID
+    const [result] = await db.query("DELETE FROM user WHERE id_user = ?", [
+      id_user,
+    ]);
+
+    // Jika tidak ada baris yang dihapus, berarti user tidak ditemukan
+    if (result.affectedRows === 0) {
+      return { status: 404, message: "User not found" };
+    }
+
+    return { status: 200, message: "User deleted successfully" };
+  } catch (error) {
+    console.error("Error deleting user:", error.message);
+    throw new Error("Error deleting user");
+  }
+};
+
+module.exports = {
+  userRegistration,
+  userLogin,
+  getAllUsers,
+  getUserProfileById,
+  updateUserById,
+  deleteUserById,
+};
