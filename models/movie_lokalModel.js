@@ -83,7 +83,7 @@ const getAllmovies = async () => {
   try {
     // Ambil semua data pengguna
     const [result] = await db.query(
-      "SELECT id_movie, title, overview, backdrop_path from movie_lokal"
+      "SELECT id_movie, title, overview, backdrop_path, genre from movie_lokal"
     );
     return result;
   } catch (error) {
