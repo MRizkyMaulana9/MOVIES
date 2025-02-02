@@ -1,5 +1,6 @@
 const userModel = require("../models/userModel");
 const auth = require("../middlewares/auth");
+
 const userRegistration = async (req, res) => {
   const data = req.body;
   try {
@@ -38,7 +39,7 @@ const userLogin = async (req, res) => {
 const getAllUsers = async (req, res) => {
   try {
     // Periksa apakah pengguna adalah admin
-    if (req.getuser.is_admin !== 1) {
+    if (req.user.is_admin !== 1) {
       return res
         .status(403)
         .json({ message: "Access Denied: Only admins can view all users" });
@@ -66,7 +67,7 @@ const updateUser = async (req, res) => {
 
   try {
     // Periksa apakah pengguna memiliki akses ke ID ini
-    if (req.getuser.id_user !== id_user && req.getuser.is_admin !== 1) {
+    if (req.user.id_user !== id_user && req.user.is_admin !== 1) {
       return res
         .status(403)
         .json({ message: "Access denied: Unauthorized user" });
@@ -85,7 +86,7 @@ const deleteUser = async (req, res) => {
 
   try {
     // Periksa apakah pengguna adalah admin
-    if (req.getuser.is_admin !== 1) {
+    if (req.user.is_admin !== 1) {
       return res
         .status(403)
         .json({ message: "Access Denied: Only admins can delete users" });

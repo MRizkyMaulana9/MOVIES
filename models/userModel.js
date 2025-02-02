@@ -5,7 +5,6 @@ const Secret_key = "rizext";
 const userRegistration = async (data, requester) => {
   const { nama_user, email_user, nomor_telepon, password, is_admin } = data;
 
-  // Validasi input
   if (!nama_user || !email_user || !nomor_telepon || !password) {
     return {
       status: 400,
@@ -14,23 +13,34 @@ const userRegistration = async (data, requester) => {
   }
 
   try {
-    const salt = 10;
-    const newPassword = await bcrypt.hash(password, salt);
+    // Cek apakah email sudah ada di database
+    const [existingUser] = await db.query(
+      "SELECT email_user FROM user WHERE email_user = ?",
+      [email_user]
+    );
 
-    // Jika is_admin tidak disertakan, defaultkan ke 0 (user biasa)
-    let adminStatus = 0; // Default: User biasa
+    if (existingUser.length > 0) {
+      return {
+        status: 400,
+        message: "Email sudah digunakan. Gunakan email lain.",
+      };
+    }
+
+    const saltRounds = 10;
+    const newPassword = await bcrypt.hash(password, saltRounds);
+
+    // Tentukan apakah user ini admin atau tidak
+    let adminStatus = 0;
     if (is_admin !== undefined) {
-      // Jika pengguna meminta is_admin = 1, periksa apakah requester adalah admin
       if (is_admin === 1 && (!requester || requester.is_admin !== 1)) {
         return {
           status: 403,
           message: "Access Denied: Only admins can create other admins",
         };
       }
-      adminStatus = is_admin; // Hanya diterima jika requester adalah admin
+      adminStatus = is_admin;
     }
 
-    // Menyisipkan data ke dalam tabel user
     const [result] = await db.query(
       "INSERT INTO user (nama_user, email_user, nomor_telepon, password, is_admin) VALUES (?, ?, ?, ?, ?)",
       [nama_user, email_user, nomor_telepon, newPassword, adminStatus]
@@ -63,50 +73,50 @@ const userLogin = async (data) => {
       };
     }
 
-    // Query database untuk mendapatkan pengguna berdasarkan email
-    const [getUser] = await db.query(
-      "SELECT * FROM user WHERE email_user = ?",
+    const [User] = await db.query(
+      "SELECT * FROM user WHERE email_user = ? LIMIT 1",
       [email_user]
     );
 
-    if (getUser.length > 0) {
-      const user = getUser[0];
+    if (!User || User.length === 0) {
+      return {
+        status: 400,
+        message: "Email tidak ditemukan",
+      };
+    }
 
-      // Verifikasi password menggunakan bcrypt
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (isPasswordValid) {
-        // Membuat payload untuk token JWT
-        const payload = {
-          id_user: user.id_user,
-          nama_user: user.nama_user,
-          email_user: user.email_user,
-          is_admin: user.is_admin, // Tambahkan role pengguna
-        };
+    const user = User[0];
 
-        // Membuat token JWT
-        const token = jwt.sign(payload, Secret_key, { expiresIn: "1h" });
-        return {
-          status: 200,
-          message: "Login berhasil",
-          token: token,
-          data: {
-            id_user: user.id_user,
-            nama_user: user.nama_user,
-            email_user: user.email_user,
-            is_admin: user.is_admin,
-          },
-        };
-      }
-
+    // Verifikasi password menggunakan bcrypt
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
       return {
         status: 400,
         message: "Password salah",
       };
     }
 
+    const payload = {
+      id_user: user.id_user,
+      nama_user: user.nama_user,
+      email_user: user.email_user,
+      is_admin: user.is_admin,
+    };
+
+    const token = jwt.sign(payload, Secret_key, { expiresIn: "1h" });
+    const refreshToken = jwt.sign(payload, Secret_key, { expiresIn: "7d" });
+
     return {
-      status: 400,
-      message: "Email tidak ditemukan",
+      status: 200,
+      message: "Login berhasil",
+      token: token,
+      refreshToken: refreshToken,
+      data: {
+        id_user: user.id_user,
+        nama_user: user.nama_user,
+        email_user: user.email_user,
+        is_admin: user.is_admin,
+      },
     };
   } catch (error) {
     console.error("Error saat login:", error.message);
@@ -161,6 +171,8 @@ const getUserProfileById = async (data) => {
         nama_user: result[0].nama_user,
         email_user: result[0].email_user,
         nomor_telepon: result[0].nomor_telepon,
+        admin: result[0].is_admin,
+        info: "(1) = admin, (0) = user",
       },
     };
   } catch (error) {
